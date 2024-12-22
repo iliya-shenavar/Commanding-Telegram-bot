@@ -7,9 +7,11 @@ import time
 import threading
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton
+
 
 # Load bot token securely from environment variables
-BOT_TOKEN = "Its Private"
+BOT_TOKEN = "7552731057:AAF7lTTsiy-6r4gLr2ZKbyTkMp37gyFghLU"
 if not BOT_TOKEN:
     raise ValueError(
         "Telegram Bot Token is not set. Please set TELEGRAM_BOT_TOKEN as an environment variable."
@@ -30,17 +32,17 @@ USER_CODES = {
     "آقای متین": "3035",
     "آقای شناور": "3041",
     "آقای لواسانی": "3053",
-    "آقای جان بخش": "3069",
     "آقای ابراهیمی": "4082",
     "آقای شکیبی": "4071",
 }
 
-Manager = ["آقای شناور"]
+Manager = ["آقای شکیبی"]
 
 # Thread lock for file operations
 file_lock = threading.Lock()
 
 PRIORITY_LEVELS = ["1", "2", "3", "4", "5"]
+USER_NAMES_LIST = list(USER_CODES.keys())
 
 
 # Check and create files if they don't exist
@@ -228,7 +230,7 @@ def welcome(message):
     )
 
 
-@bot.message_handler(func=lambda message: True)
+@bot.message_handler(content_types=["text"])
 def check_code_or_report(message):
     # Check if the entered code matches any user code
     entered_code = message.text
@@ -258,7 +260,6 @@ def check_code_or_report(message):
             )
     else:
         bot.send_message(message.chat.id, "کد اشتباه است. لطفا دوباره امتحان کنید.")
-
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_query(call):
@@ -300,24 +301,30 @@ def get_priority(message, command):
     priority = message.text.strip()
 
     if priority not in PRIORITY_LEVELS:
-        bot.send_message(message.chat.id, "درجه اهمیت نامعتبر است. لطفا مجددا انتخاب کنید.")
+        bot.send_message(message.chat.id, "درجه اهمیت نامعتبر است. لطفا مجدداً انتخاب کنید.")
         bot.send_message(message.chat.id, "لطفا درجه اهمیت دستور را مشخص کنید:", reply_markup=priority_menu())
         return
 
-    # مرحله بعد: دریافت مهلت
     bot.send_message(message.chat.id, "لطفا مهلت انجام دستور را وارد کنید:")
     bot.register_next_step_handler(message, lambda msg: get_deadline(msg, command, priority))
 
 def get_deadline(message, command, priority):
     deadline = message.text.strip()
 
-    # مرحله بعد: دریافت نام کاربر هدف
     bot.send_message(message.chat.id, "لطفا نام کاربری که دستور به او ارسال می‌شود را وارد کنید:")
-    bot.register_next_step_handler(message, lambda msg: send_command_to_user(msg, command, priority, deadline))
+    bot.send_message(message.chat.id, "کاربران موجود:")
 
+    # ساخت کیبورد برای نمایش نام کاربران
+    markup = ReplyKeyboardMarkup(one_time_keyboard=False, resize_keyboard=True)
+    for user_name in USER_NAMES_LIST:
+        markup.add(KeyboardButton(user_name))  # اضافه کردن هر نام کاربری به کیبورد
+    markup.add(KeyboardButton("اتمام دستور"))  # اضافه کردن گزینه "اتمام دستور"
+
+    bot.send_message(message.chat.id, "لطفا نام کاربری را از کیبورد زیر انتخاب کنید:", reply_markup=markup)
+    bot.register_next_step_handler(message, lambda msg: send_command_to_multiple_users(msg, command, priority, deadline))
 
 def send_command_to_user(message, command, priority, deadline):
-    target_user_name = message.text.strip()
+    target_user_name = message.text.strip()  # حذف فضاهای اضافی
     target_chat_id = None
 
     try:
@@ -326,21 +333,65 @@ def send_command_to_user(message, command, priority, deadline):
 
         # پیدا کردن chat_id بر اساس نام
         for user in users:
-            if user["name"] == target_user_name:
+            if user["name"].strip() == target_user_name:  # استفاده از strip()
                 target_chat_id = user["chat_id"]
                 break
 
         if target_chat_id:
             bot.send_message(
                 target_chat_id,
-                f"دستور مدیر: {command}\nدرجه اهمیت: {priority}\nمهلت: {deadline}",
+                f"شما یک دستور جدید دریافت کردید \nدستور مدیر: {command}\nدرجه اهمیت: {priority}\nمهلت: {deadline}",
             )
             bot.send_message(message.chat.id, "دستور با موفقیت ارسال شد.")
         else:
-            bot.send_message(message.chat.id, "کاربر مورد نظر پیدا نشد. لطفا مجددا تلاش کنید.")
+            bot.send_message(message.chat.id, "کاربر مورد نظر پیدا نشد. لطفا مجدداً تلاش کنید.")
     except Exception as e:
         print(f"خطا در ارسال دستور: {e}")
         bot.send_message(message.chat.id, "خطا در پردازش درخواست.")
+
+# تعریف یک متغیر سراسری برای ذخیره لیست کاربران انتخاب‌شده
+selected_user_names = []
+
+def send_command_to_multiple_users(message, command, priority, deadline):
+    global selected_user_names  # استفاده از متغیر سراسری
+
+    chat_id = message.chat.id  # شناسه چت مدیر برای ارسال پیام
+
+    if message.text == "اتمام دستور":  # زمانی که گزینه "اتمام دستور" زده شد
+        if selected_user_names:
+            with open(USERS_FILE, "r", encoding="utf-8") as file:
+                users = json.load(file)
+
+            # ارسال دستور به تمامی کاربران انتخاب‌شده
+            for user_name in selected_user_names:
+                target_chat_id = next(
+                    (user["chat_id"] for user in users if user["name"] == user_name), None
+                )
+                if target_chat_id:
+                    bot.send_message(
+                        target_chat_id,
+                        f"شما یک دستور جدید دریافت کردید \nدستور مدیر: {command}\nدرجه اهمیت: {priority}\nمهلت: {deadline}",
+                    )
+            bot.send_message(chat_id, "دستور به تمام کاربران منتخب ارسال شد.")
+        else:
+            bot.send_message(chat_id, "هیچ کاربری انتخاب نشده است.")
+        
+        # بازگشت به منوی اصلی و پاک کردن لیست
+        selected_user_names.clear()  # پاک کردن لیست کاربران پس از ارسال دستور
+        bot.send_message(
+            chat_id,
+            "لطفا یکی از گزینه‌های زیر را انتخاب کنید:",
+            reply_markup=manager_menu(),
+        )
+        return
+
+    # اضافه کردن کاربر به لیست کاربران انتخاب‌شده
+    selected_user_names.append(message.text)
+    bot.send_message(chat_id, f"کاربر {message.text} به لیست ارسال اضافه شد.")
+    bot.send_message(chat_id, "لطفا نام کاربری بعدی را وارد کنید یا گزینه 'اتمام دستور' را انتخاب کنید.")
+    bot.register_next_step_handler(
+        message, lambda msg: send_command_to_multiple_users(msg, command, priority, deadline)
+    )
 
 
 
@@ -411,9 +462,9 @@ def handle_file(message):
         bot.send_message(chat_id, "خطا در پردازش فایل.")
 
 def priority_menu():
-    markup = InlineKeyboardMarkup()
+    markup = ReplyKeyboardMarkup(one_time_keyboard=True, resize_keyboard=True)
     for priority in PRIORITY_LEVELS:
-        markup.add(InlineKeyboardButton(priority, callback_data=f"priority_{priority}"))
+        markup.add(KeyboardButton(priority))
     return markup
 
 
