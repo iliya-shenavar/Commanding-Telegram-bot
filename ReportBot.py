@@ -11,7 +11,7 @@ from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
 
 # Load bot token securely from environment variables
-BOT_TOKEN = "7552731057:AAF7lTTsiy-6r4gLr2ZKbyTkMp37gyFghLU"
+BOT_TOKEN = "It's Private :)"
 if not BOT_TOKEN:
     raise ValueError(
         "Telegram Bot Token is not set. Please set TELEGRAM_BOT_TOKEN as an environment variable."
